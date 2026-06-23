@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>订单格式转换</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
+      background: #f0f2f5;
+      display: flex;
+      flex-direction: column;
+      padding: 16px 20px 10px;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 12px;
+      flex-shrink: 0;
+    }
+    .header h1 { font-size: 20px; font-weight: 700; color: #1a1a1a; }
+    .header p { font-size: 13px; color: #888; margin-top: 4px; }
+
+    .panels {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      max-width: 1600px;
+      width: 100%;
+      margin: 0 auto 12px;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .panel {
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 11px 16px;
+      border-bottom: 1px solid #f0f0f0;
+      background: #fafafa;
+      flex-shrink: 0;
+    }
+    .panel-title { font-size: 13px; font-weight: 600; color: #333; }
+    .panel-badge {
+      font-size: 12px; color: #999;
+      background: #f0f0f0;
+      padding: 2px 8px; border-radius: 10px;
+    }
+
+    textarea {
+      flex: 1;
+      width: 100%;
+      min-height: 0;
+      border: none;
+      resize: none;
+      padding: 14px 16px;
+      font-family: 'SF Mono', 'Consolas', 'Courier New', monospace;
+      font-size: 12.5px;
+      line-height: 1.7;
+      color: #222;
+      outline: none;
+      background: #fff;
+    }
+    textarea::placeholder { color: #ccc; }
+    textarea[readonly] { background: #fafcff; color: #1a1a2e; }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      max-width: 1600px;
+      width: 100%;
+      margin: 0 auto;
+      flex-shrink: 0;
+    }
+
+    .btn {
+      height: 38px;
+      padding: 0 22px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-primary { background: #e41d1c; color: #fff; padding: 0 32px; }
+    .btn-primary:hover { background: #c8190e; }
+    .btn-primary:active { transform: scale(0.97); }
+    .btn-ghost { background: #fff; color: #444; border: 1px solid #ddd; }
+    .btn-ghost:hover { background: #f5f5f5; }
+
+    .status-bar {
+      text-align: center;
+      height: 24px;
+      margin-top: 8px;
+      font-size: 13px;
+      color: #555;
+      flex-shrink: 0;
+    }
+    .status-bar.error { color: #e41d1c; }
+    .status-bar.success { color: #28a745; }
+
+    .toast {
+      position: fixed;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%) translateY(8px);
+      background: rgba(30,30,30,0.9);
+      color: #fff;
+      padding: 8px 20px;
+      border-radius: 20px;
+      font-size: 13px;
+      opacity: 0;
+      transition: opacity 0.2s, transform 0.2s;
+      pointer-events: none;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>订单格式转换</h1>
+  <p>粘贴完整原始文本 → 全文 \n 转换为换行 + 订单块格式化为分隔块</p>
+</div>
+
+<div class="panels">
+  <div class="panel">
+    <div class="panel-head">
+      <span class="panel-title">原始数据（完整粘贴）</span>
+      <span class="panel-badge" id="inputBadge">待输入</span>
+    </div>
+    <textarea id="input" placeholder="将完整原始文本粘贴到这里…
+
+转换逻辑：
+1. 全文所有 \n 替换为真实换行
+2. 订单列表区块额外格式化为分隔块样式
+3. 其余文字内容不做任何修改"></textarea>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <span class="panel-title">转换结果</span>
+      <span class="panel-badge" id="outputBadge">-</span>
+    </div>
+    <textarea id="output" readonly placeholder="转换结果将显示在这里…"></textarea>
+  </div>
+</div>
+
+<div class="actions">
+  <button class="btn btn-ghost" onclick="clearAll()">清空</button>
+  <button class="btn btn-primary" onclick="convert()">一键转换</button>
+  <button class="btn btn-ghost" onclick="copyOutput()">复制结果</button>
+</div>
+<div class="status-bar" id="statusBar"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+  function escRe(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function extractVal(str, key) {
+    const re = new RegExp(`['"](${escRe(key)})['"]\s*:\s*['"]([^'"]*)['"]`);
+    const m = str.match(re);
+    return m ? m[2] : '';
+  }
+
+  const FIELDS = [
+    ['订单号',        '订单号',        false],
+    ['订单状态',      '订单状态',      false],
+    ['下单日期',      '下单日期',      false],
+    ['订单金额',      '订单金额',      false],
+    ['下单pin',       '下单pin',       false],
+    ['店铺名称',      '店铺名称',      false],
+    ['商品名称',      '商品名称',      true],
+    ['商品品牌',      '商品品牌',      true],
+    ['一级分类',      '一级分类',      true],
+    ['售后方式',      '售后方式',      true],
+    ['售后服务期阶段','售后服务期阶段',true],
+    ['售后服务期状态','售后服务期状态',true],
+    ['售后申请时间',  '售后申请时间',  true],
+  ];
+
+  function parseOrder(dictStr) {
+    const order = {};
+    const listMatch = dictStr.match(/['"]商品列表['"]\s*:\s*\[([\s\S]*?)\]/);
+    const itemStr = listMatch ? listMatch[1] : '';
+    for (const [label, key, inList] of FIELDS) {
+      order[key] = extractVal(inList ? (itemStr || dictStr) : dictStr, key);
+    }
+    return order;
+  }
+
+  function formatOrder(order, idx, total) {
+    const title = ` 订单 ${idx + 1} / ${total} `;
+    const TOTAL_WIDTH = 44;
+    const side = Math.floor((TOTAL_WIDTH - title.length) / 2);
+    const header = '═'.repeat(side) + title + '═'.repeat(TOTAL_WIDTH - side - title.length);
+    const footer = '═'.repeat(header.length);
+    let lines = header + '\n';
+    for (const [label, key] of FIELDS) {
+      lines += `${label}：${order[key]}\n`;
+    }
+    lines += footer;
+    return lines;
+  }
+
+  function splitOrders(text) {
+    const parts = text.split(/(?=\d+\.\s*\{)/);
+    return parts
+      .map(p => p.trim())
+      .filter(p => /^\d+\.\s*\{/.test(p))
+      .map(p => p.replace(/^\d+\.\s*/, '').trim());
+  }
+
+  function convert() {
+    const raw = document.getElementById('input').value;
+    if (!raw.trim()) { setStatus('请先粘贴原始数据', 'error'); return; }
+
+    // 第一步：全文字面 \n → 真实换行
+    let text = raw.replace(/\\n/g, '\n');
+
+    // 第二步：找包含订单号的代码块，格式化订单
+    let orderCount = 0;
+    const codeBlockRe = /(```[^\n]*\n)([\s\S]*?)(\n```)/g;
+    let hasOrderBlock = false;
+
+    text = text.replace(codeBlockRe, (full, open, content, close) => {
+      if (!content.includes('订单号')) return full;
+
+      const dicts = splitOrders(content);
+      if (dicts.length === 0) return full;
+
+      hasOrderBlock = true;
+      orderCount = dicts.length;
+      const orders = dicts.map(d => parseOrder(d));
+      const formatted = orders.map((o, i) => formatOrder(o, i, orders.length)).join('\n\n');
+      return '\n' + formatted + '\n';
+    });
+
+    document.getElementById('output').value = text;
+    document.getElementById('outputBadge').textContent = hasOrderBlock ? `共 ${orderCount} 条订单` : '已转换';
+    setStatus(
+      hasOrderBlock
+        ? `✓ 全文 \\n 已展开，订单块已格式化（${orderCount} 条）`
+        : '✓ 全文 \\n 已展开（未检测到订单代码块）',
+      'success'
+    );
+  }
+
+  function copyOutput() {
+    const val = document.getElementById('output').value;
+    if (!val) { showToast('没有可复制的内容'); return; }
+    navigator.clipboard.writeText(val)
+      .then(() => showToast('已复制到剪贴板'))
+      .catch(() => {
+        document.getElementById('output').select();
+        document.execCommand('copy');
+        showToast('已复制到剪贴板');
+      });
+  }
+
+  function clearAll() {
+    document.getElementById('input').value = '';
+    document.getElementById('output').value = '';
+    document.getElementById('inputBadge').textContent = '待输入';
+    document.getElementById('outputBadge').textContent = '-';
+    setStatus('');
+  }
+
+  function setStatus(msg, type = '') {
+    const el = document.getElementById('statusBar');
+    el.textContent = msg;
+    el.className = 'status-bar' + (type ? ' ' + type : '');
+  }
+
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2000);
+  }
+
+  document.getElementById('input').addEventListener('input', function () {
+    const len = this.value.length;
+    document.getElementById('inputBadge').textContent = len > 0 ? `${len.toLocaleString()} 字符` : '待输入';
+  });
+</script>
+</body>
+</html>
